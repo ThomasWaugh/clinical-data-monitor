@@ -13,9 +13,12 @@ Drift scenarios:
 """
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from app.config import settings
 from app.constants import VITALS_BASELINE
@@ -105,31 +108,37 @@ async def run_simulator(
     while True:
         start = asyncio.get_event_loop().time()
 
-        values, drift_active = _sample_vitals(elapsed, rng)
-        now = datetime.now(timezone.utc)
+        try:
+            values, drift_active = _sample_vitals(elapsed, rng)
+            now = datetime.now(timezone.utc)
 
-        reading = VitalReading(
-            timestamp=now,
-            drift_active=drift_active,
-            **values,
-        )
+            reading = VitalReading(
+                timestamp=now,
+                drift_active=drift_active,
+                **values,
+            )
 
-        async with async_session() as session:
-            session.add(reading)
-            await session.commit()
-            await session.refresh(reading)
+            async with async_session() as session:
+                session.add(reading)
+                await session.commit()
+                await session.refresh(reading)
 
-        # Broadcast to all SSE reading subscribers
-        payload = {
-            "id": reading.id,
-            "timestamp": now.isoformat(),
-            "drift_active": drift_active,
-            **values,
-        }
-        readings_broadcaster.publish(payload)
+            # Broadcast to all SSE reading subscribers
+            payload = {
+                "id": reading.id,
+                "timestamp": now.isoformat(),
+                "drift_active": drift_active,
+                **values,
+            }
+            readings_broadcaster.publish(payload)
 
-        # Run detection; events are broadcast to events subscribers by the detector
-        await detector.process(reading, events_broadcaster)
+            # Run detection; events are broadcast to events subscribers by the detector
+            await detector.process(reading, events_broadcaster)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception("Simulator loop error (will retry): %s", e)
 
         elapsed += settings.reading_interval_seconds
         taken = asyncio.get_event_loop().time() - start
