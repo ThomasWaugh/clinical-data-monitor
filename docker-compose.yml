@@ -1,0 +1,17 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:10000"
+    volumes:
+      - db-data:/data
+      # Mount source for development hot-reload
+      - ./app:/app/app
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/monitor.db
+    command: uvicorn app.main:app --host 0.0.0.0 --port 10000 --reload
+
+volumes:
+  db-data:
